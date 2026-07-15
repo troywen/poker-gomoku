@@ -78,36 +78,40 @@ async function handleGet(req) {
 // Read request body — works in Vercel serverless (Node.js IncomingMessage) and Web API
 async function readBody(req) {
   if (req.body !== undefined && req.body !== null) {
-    console.log('DBG body from req.body:', typeof req.body, JSON.stringify(req.body).slice(0,80));
-    return req.body;
+    // Vercel may parse body as a string already
+    if (typeof req.body === 'string') {
+      try { return JSON.parse(req.body); } catch(e) { return {}; }
+    }
+    if (typeof req.body === 'object') return req.body;
   }
   // Web API Request (has text())
   if (typeof req.text === 'function') {
     try {
       const t = await req.text();
-      console.log('DBG text() length:', t.length, 'content:', t.slice(0,80));
       return t ? JSON.parse(t) : {};
-    } catch(e) { console.log('DBG text() error:', e.message); return {}; }
+    } catch(e) { return {}; }
   }
   // Node.js IncomingMessage (stream)
   return new Promise(resolve => {
     let data = '';
     req.on('data', chunk => { data += chunk; });
     req.on('end', () => {
-      console.log('DBG stream data length:', data.length, 'content:', data.slice(0,80));
       try { resolve(data ? JSON.parse(data) : {}); }
       catch(e) { resolve({}); }
     });
-    req.on('error', e => { console.log('DBG stream error:', e.message); resolve({}); });
+    req.on('error', e => { resolve({}); });
   });
 }
 
 async function handlePost(req) {
+  const rawBody = req.body;
   const body = await readBody(req);
-  const { roomId, action, payload } = body;
-  // Debug: return body info in error for diagnosis
+  const roomId = body.roomId;
+  const action = body.action;
+  const payload = body.payload;
+  // Debug
   if (!roomId || !action) {
-    return err(`missing roomId or action | bodyKeys=${Object.keys(body).join(',')} | hasBody=${req.body !== undefined} | hasText=${typeof req.text === 'function'} | method=${req.method}`);
+    return err(`missing | rawBodyType=${typeof rawBody} rawBodyLen=${typeof rawBody==='string'?rawBody.length:typeof rawBody==='object'?Object.keys(rawBody||{}).length:'?'} roomId=${roomId} action=${action} bodyKeys=${Object.keys(body).join(',')}`);
   }
 
   switch (action) {
