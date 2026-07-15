@@ -44,7 +44,10 @@ body {
 .btn-danger { background:#e74c3c; color:#fff; }
 .btn-success { background:#27ae60; color:#fff; }
 .btn:disabled { opacity:0.4; cursor:default; }
-.room-code { text-align:center; font-size:28px; letter-spacing:6px; color:#ffd700; font-weight:700; margin:10px 0; }
+.room-code-wrap { display:flex; align-items:center; justify-content:center; gap:8px; margin:10px 0; }
+.room-code { font-size:28px; letter-spacing:6px; color:#ffd700; font-weight:700; }
+.copy-btn { padding:6px 10px; font-size:12px; border-radius:6px; border:none; background:#333; color:#fff; cursor:pointer; }
+.copy-btn:active { transform:scale(0.95); }
 #joinArea { display:none; margin-top:12px; }
 
 /* Game header */
@@ -57,7 +60,7 @@ body {
 .pinfo .name { font-size:12px; }
 .pinfo .score { font-size:17px; font-weight:700; color:#ffd700; }
 .pinfo.active .name { color:#ffd700; }
-.turn-text { font-size:11px; color:#aaa; text-align:center; }
+.turn-text { font-size:11px; color:#aaa; text-align:center; max-width:120px; }
 
 /* Board */
 .board-wrap { margin:4px 0; display:flex; justify-content:center; }
@@ -154,6 +157,19 @@ body {
 .rules-box.show { display:block; }
 .rules-box b { color:#ddd; }
 
+/* Loading overlay */
+.loading-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5);
+  z-index:200; align-items:center; justify-content:center;
+}
+.loading-overlay.show { display:flex; }
+.spinner {
+  width:40px; height:40px; border:4px solid #333;
+  border-top-color:#ffd700; border-radius:50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 @media (max-height:720px) {
   .hand-card { height:clamp(48px,11vw,70px); }
   .card { height:clamp(36px,9vw,52px); }
@@ -198,7 +214,10 @@ body {
 <div id="roomScreen" class="screen">
   <div class="lobby-box">
     <p style="font-size:12px;color:#aaa;text-align:center;">房间号</p>
-    <div class="room-code" id="roomCodeDisplay">------</div>
+    <div class="room-code-wrap">
+      <div class="room-code" id="roomCodeDisplay">------</div>
+      <button class="copy-btn" onclick="copyRoomCode()">复制</button>
+    </div>
     <div id="waitingPlayers" style="text-align:center;font-size:13px;color:#aaa;margin:10px 0;"></div>
     <div id="hostControls" style="display:none;">
       <button class="btn btn-success" onclick="startGame()" style="width:100%;">开始游戏</button>
@@ -222,7 +241,7 @@ body {
 
   <div class="board-wrap"><div class="board" id="board"></div></div>
 
-  <!-- Draw controls (drawing phase, my turn) -->
+  <!-- Draw controls -->
   <div class="draw-area" id="drawControls" style="display:none;">
     <div class="area-label">抽牌（选 1–4 张）</div>
     <div class="action-bar">
@@ -235,12 +254,12 @@ body {
     <button class="btn btn-success" id="finishDrawBtn" style="display:none;margin-top:6px;" onclick="finishDraw()">抽完了，出牌</button>
   </div>
 
-  <!-- Play area (playing phase) -->
+  <!-- Play area -->
   <div class="draw-area" id="playArea" style="display:none;">
     <div class="area-label">从本回合抽的牌中选一张放到棋盘（或弃掉）</div>
     <div class="card-row" id="playCards"></div>
     <div class="action-bar">
-      <button class="btn btn-danger" id="discardBtn" onclick="discardSelected()" style="padding:8px 16px;">弃掉选中的牌</button>
+      <button class="btn btn-danger" onclick="discardSelected()" style="padding:8px 16px;">弃掉选中的牌</button>
     </div>
   </div>
 
@@ -260,32 +279,55 @@ body {
   </div>
 </div>
 
+<!-- Loading -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+</div>
+
 <script>
 let myId = null, myRoomId = null, state = null;
 let selectedDrawnId = null;
 let pollTimer = null;
 let myName = localStorage.getItem('pg_name') || '';
+let lastVersion = 0;
+let gameoverShown = false;
+let loading = false;
+
+// ─── Loading ──────────────────────────────────────────────────
+function showLoading() { loading = true; document.getElementById('loadingOverlay').classList.add('show'); }
+function hideLoading() { loading = false; document.getElementById('loadingOverlay').classList.remove('show'); }
 
 // ─── API helpers ──────────────────────────────────────────────
 async function apiAction(action, payload, roomId) {
-  const res = await fetch('/api', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ roomId: roomId || myRoomId, action, payload: { name: myName, ...payload } }),
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error + ' | action=' + action);
-  if (data.state) state = data.state;
-  return data;
+  showLoading();
+  try {
+    const res = await fetch('/api', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomId: roomId || myRoomId, action, payload: { name: myName, ...payload } }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (data.state) {
+      state = data.state;
+      lastVersion = state.version || 0;
+    }
+    return data;
+  } finally {
+    hideLoading();
+  }
 }
 
 async function fetchState() {
-  if (!myRoomId || !myId) return;
+  if (!myRoomId || !myId || loading) return;
   try {
     const res = await fetch(`/api?roomId=${myRoomId}&playerId=${myId}`);
     const data = await res.json();
     if (data.error) return;
+    // Only re-render if version changed
+    if (data.version && data.version <= lastVersion) return;
     state = data;
+    lastVersion = data.version || 0;
     renderAll();
   } catch(e) {}
 }
@@ -328,6 +370,13 @@ function isRed(card) {
   return card.suit === '♥' || card.suit === '♦';
 }
 
+function copyRoomCode() {
+  const code = document.getElementById('roomCodeDisplay').textContent;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(code).then(() => setStatus('房间号已复制'));
+  }
+}
+
 // ─── Lobby ────────────────────────────────────────────────────
 async function createRoom() {
   const name = document.getElementById('nameInput').value.trim() || '玩家';
@@ -335,6 +384,7 @@ async function createRoom() {
   localStorage.setItem('pg_name', name);
   const roomId = Math.random().toString(36).slice(2,8).toUpperCase();
   try {
+    // Pass roomId explicitly since myRoomId is still null here
     await apiAction('createRoom', { name, roomId }, roomId);
     myRoomId = roomId; myId = 'p0';
     saveRoomPref();
@@ -350,11 +400,12 @@ async function createRoom() {
 async function joinRoom() {
   const roomId = document.getElementById('roomIdInput').value.trim().toUpperCase();
   const name = document.getElementById('nameInput').value.trim() || '玩家';
-  if (!roomId) return;
+  if (!roomId) { setStatus('请输入房间号'); return; }
   myName = name;
   localStorage.setItem('pg_name', name);
   try {
-    await apiAction('joinRoom', { name, roomId });
+    // Pass roomId explicitly since myRoomId is still null here
+    await apiAction('joinRoom', { name, roomId }, roomId);
     myRoomId = roomId; myId = 'p1';
     saveRoomPref();
     showScreen('roomScreen');
@@ -369,6 +420,7 @@ async function joinRoom() {
 function leaveRoom() {
   stopPolling();
   myRoomId = null; myId = null; state = null; selectedDrawnId = null;
+  lastVersion = 0; gameoverShown = false;
   saveRoomPref();
   showScreen('lobby');
 }
@@ -403,6 +455,13 @@ function selectDrawnCard(cardId) {
 
 async function handleCellClick(r, c) {
   if (!selectedDrawnId) { setStatus('请先从下方选择一张要出的牌'); return; }
+  // Validate card is still in drawn pool
+  if (!state || !state.drawnCards.find(cd => cd.id === selectedDrawnId)) {
+    setStatus('此牌已不在抽牌区，请重新选择');
+    selectedDrawnId = null;
+    renderPlayCards();
+    return;
+  }
   try {
     const data = await apiAction('placeCard', { row: r, col: c, cardId: selectedDrawnId });
     selectedDrawnId = null;
@@ -429,10 +488,10 @@ async function discardSelected() {
 async function rejoinIfNeeded() {
   if (!myRoomId || !myName) return;
   try {
-    const data = await apiAction('rejoinRoom', {});
+    const data = await apiAction('rejoinRoom', {}, myRoomId);
     if (data.ok && data.player) {
       myId = data.player.id;
-      if (data.state) state = data.state;
+      if (data.state) { state = data.state; lastVersion = state.version || 0; }
       renderAll();
     }
   } catch(e) {}
@@ -449,11 +508,14 @@ function renderAll() {
   renderHeader();
   refreshWaiting();
 
-  if (state.lastAction && state.lastAction.type === 'gameover') {
+  if (state.lastAction && state.lastAction.type === 'gameover' && !gameoverShown) {
+    gameoverShown = true;
     let html = '';
     for (const sc of state.lastAction.scores) html += `<p>${sc.name} — ${sc.score} 分</p>`;
     stopPolling();
-    showModal('🏆 游戏结束', html, '返回大厅', () => showScreen('lobby'));
+    showModal('🏆 游戏结束', html, '返回大厅', () => {
+      leaveRoom();
+    });
   }
 }
 
@@ -504,7 +566,7 @@ function renderDrawPool() {
   row.innerHTML = '';
   const btn = document.getElementById('finishDrawBtn');
   if (!state.drawnCards || state.drawnCards.length === 0) { btn.style.display = 'none'; return; }
-  btn.style.display = state.drawnCards.length >= 1 ? '' : 'none';
+  btn.style.display = '';
   for (const card of state.drawnCards) {
     const el = document.createElement('div');
     el.className = 'drawn-card ' + (isRed(card) ? 'red' : 'black');
@@ -554,7 +616,8 @@ function renderHeader() {
   else if (state.phase === 'gameover') ti.textContent = '游戏结束';
   else {
     const cp = state.players[state.currentPlayerIndex];
-    ti.textContent = cp ? (cp.id === myId ? '▶ 你的回合' : cp.name + ' 的回合') : '';
+    const isMyTurn = cp && cp.id === myId;
+    ti.textContent = cp ? (isMyTurn ? '▶ 你的回合' : cp.name + ' 的回合') : '';
   }
 }
 
