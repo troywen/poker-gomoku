@@ -105,7 +105,10 @@ async function readBody(req) {
 async function handlePost(req) {
   const body = await readBody(req);
   const { roomId, action, payload } = body;
-  if (!roomId || !action) return err('missing roomId or action');
+  // Debug: return body info in error for diagnosis
+  if (!roomId || !action) {
+    return err(`missing roomId or action | bodyKeys=${Object.keys(body).join(',')} | hasBody=${req.body !== undefined} | hasText=${typeof req.text === 'function'} | method=${req.method}`);
+  }
 
   switch (action) {
     case 'createRoom': return doCreateRoom(roomId, payload);
