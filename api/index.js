@@ -1,38 +1,46 @@
-// Redis client (Vercel Redis / Upstash via REDIS_URL env var)
-// Falls back to in-memory store for local dev without a Redis connection
-let redis = null;
-let redisReady = false;
-let redisConnecting = false;
+// Edge Config storage (Vercel native KV store)
+// Falls back to in-memory store for local dev without EDGE_CONFIG
+const memStore = new Map();
 
-async function getRedis() {
-  if (redisReady) return redis;
-  if (redisConnecting || !process.env.REDIS_URL) return null;
-  redisConnecting = true;
+async function ecGet(key) {
+  if (!process.env.EDGE_CONFIG) return null;
   try {
-    const { createClient } = require('redis');
-    redis = createClient({ url: process.env.REDIS_URL });
-    redis.on('error', () => { redisReady = false; });
-    await redis.connect();
-    redisReady = true;
-  } catch(e) { redis = null; }
-  redisConnecting = false;
-  return redisReady ? redis : null;
+    const res = await fetch(`${process.env.EDGE_CONFIG}&key=${encodeURIComponent(key)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch(e) { return null; }
+}
+
+async function ecSet(key, val) {
+  if (!process.env.EDGE_CONFIG) {
+    memStore.set(key, typeof val === 'string' ? val : JSON.stringify(val));
+    return true;
+  }
+  try {
+    const url = new URL(process.env.EDGE_CONFIG);
+    const base = `${url.protocol}//${url.host}${url.pathname}`;
+    const token = url.searchParams.get('token');
+    const res = await fetch(`${base}/items?token=${token}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ op: 'upsert', key, value: val }] })
+    });
+    return res.ok;
+  } catch(e) { return false; }
 }
 
 const G = require('../lib/game.js');
 const { DRAW_MIN, DRAW_MAX } = G;
 
-// In-memory fallback for local dev (no Redis)
-const memStore = new Map();
 async function kvGet(key) {
-  const r = await getRedis();
-  try { if (r) return await r.get(key); } catch(e) {}
+  const val = await ecGet(key);
+  if (val !== null && val !== undefined) return val;
   return memStore.get(key) || null;
 }
 async function kvSet(key, val, ttl) {
-  const r = await getRedis();
-  try { if (r) return await r.set(key, val, { EX: ttl }); } catch(e) {}
-  memStore.set(key, typeof val === 'string' ? val : JSON.stringify(val)); return true;
+  const ok = await ecSet(key, typeof val === 'string' ? val : JSON.stringify(val));
+  if (!ok) memStore.set(key, typeof val === 'string' ? val : JSON.stringify(val));
+  return true;
 }
 
 const TTL = 7200; // 2h room lifetime
