@@ -77,20 +77,28 @@ async function handleGet(req) {
 
 // Read request body — works in Vercel serverless (Node.js IncomingMessage) and Web API
 async function readBody(req) {
-  if (req.body !== undefined && req.body !== null) return req.body;
+  if (req.body !== undefined && req.body !== null) {
+    console.log('DBG body from req.body:', typeof req.body, JSON.stringify(req.body).slice(0,80));
+    return req.body;
+  }
   // Web API Request (has text())
   if (typeof req.text === 'function') {
-    try { const t = await req.text(); return t ? JSON.parse(t) : {}; } catch(e) { return {}; }
+    try {
+      const t = await req.text();
+      console.log('DBG text() length:', t.length, 'content:', t.slice(0,80));
+      return t ? JSON.parse(t) : {};
+    } catch(e) { console.log('DBG text() error:', e.message); return {}; }
   }
   // Node.js IncomingMessage (stream)
   return new Promise(resolve => {
     let data = '';
     req.on('data', chunk => { data += chunk; });
     req.on('end', () => {
+      console.log('DBG stream data length:', data.length, 'content:', data.slice(0,80));
       try { resolve(data ? JSON.parse(data) : {}); }
       catch(e) { resolve({}); }
     });
-    req.on('error', () => resolve({}));
+    req.on('error', e => { console.log('DBG stream error:', e.message); resolve({}); });
   });
 }
 
