@@ -1,4 +1,4 @@
-const CACHE = 'pg-v2';
+const CACHE = 'pg-v3';
 const ASSETS = ['/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -16,20 +16,21 @@ self.addEventListener('activate', (event) => {
       )
     )
   );
-  self.clients.claim();
+  // Force all clients to reload with fresh code
+  self.clients.matchAll().then((clients) => {
+    clients.forEach((client) => client.navigate(client.url));
+  });
 });
 
 self.addEventListener('fetch', (event) => {
-  // API / socket.io requests go to network
-  if (event.request.url.includes('/api') || event.request.url.includes('/socket.io')) return;
-  // Network-first for HTML/JS (real-time game needs fresh code)
+  const url = new URL(event.request.url);
+  // Never cache: API, socket.io, HTML pages (always fetch fresh)
+  if (url.pathname === '/' || url.pathname.endsWith('.html') ||
+      url.pathname.includes('/api') || url.pathname.includes('/socket.io')) {
+    return;
+  }
+  // Cache static assets (icons, manifest) with cache-first
   event.respondWith(
-    fetch(event.request).then((res) => {
-      const copy = res.clone();
-      caches.open(CACHE).then((cache) => {
-        if (res.status === 200) cache.put(event.request, copy);
-      });
-      return res;
-    }).catch(() => caches.match(event.request))
+    caches.match(event.request).then((res) => res || fetch(event.request))
   );
 });
