@@ -78,11 +78,14 @@ async function handleGet(req) {
 // Read request body — works in Vercel serverless (Node.js IncomingMessage) and Web API
 async function readBody(req) {
   if (req.body !== undefined && req.body !== null) {
-    // Vercel may parse body as a string already
+    // Vercel parses body as object — ensure it's a plain object
     if (typeof req.body === 'string') {
       try { return JSON.parse(req.body); } catch(e) { return {}; }
     }
-    if (typeof req.body === 'object') return req.body;
+    if (typeof req.body === 'object') {
+      // Use Object.assign to ensure property access works (handles null-prototype objects)
+      return Object.assign({}, req.body);
+    }
   }
   // Web API Request (has text())
   if (typeof req.text === 'function') {
@@ -104,14 +107,12 @@ async function readBody(req) {
 }
 
 async function handlePost(req) {
-  const rawBody = req.body;
   const body = await readBody(req);
   const roomId = body.roomId;
   const action = body.action;
   const payload = body.payload;
-  // Debug
   if (!roomId || !action) {
-    return err(`missing | rawBodyType=${typeof rawBody} rawBodyLen=${typeof rawBody==='string'?rawBody.length:typeof rawBody==='object'?Object.keys(rawBody||{}).length:'?'} roomId=${roomId} action=${action} bodyKeys=${Object.keys(body).join(',')}`);
+    return err(`missing roomId or action | keys=${Object.keys(body).join(',')}`);
   }
 
   switch (action) {

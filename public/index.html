@@ -267,14 +267,14 @@ let pollTimer = null;
 let myName = localStorage.getItem('pg_name') || '';
 
 // ─── API helpers ──────────────────────────────────────────────
-async function apiAction(action, payload) {
+async function apiAction(action, payload, roomId) {
   const res = await fetch('/api', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ roomId: myRoomId, action, payload: { name: myName, ...payload } }),
+    body: JSON.stringify({ roomId: roomId || myRoomId, action, payload: { name: myName, ...payload } }),
   });
   const data = await res.json();
-  if (data.error) throw new Error(data.error);
+  if (data.error) throw new Error(data.error + ' | action=' + action);
   if (data.state) state = data.state;
   return data;
 }
@@ -335,7 +335,7 @@ async function createRoom() {
   localStorage.setItem('pg_name', name);
   const roomId = Math.random().toString(36).slice(2,8).toUpperCase();
   try {
-    await apiAction('createRoom', { name, roomId });
+    await apiAction('createRoom', { name, roomId }, roomId);
     myRoomId = roomId; myId = 'p0';
     saveRoomPref();
     showScreen('roomScreen');
