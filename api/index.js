@@ -66,8 +66,16 @@ async function handleGet(req) {
   return ok({ ...G.publicState(room, playerId), playerId });
 }
 
+async function readBody(req) {
+  if (req.body) return req.body;
+  try {
+    const text = await req.text();
+    return text ? JSON.parse(text) : {};
+  } catch(e) { return {}; }
+}
+
 async function handlePost(req) {
-  const body = req.body || {};
+  const body = await readBody(req);
   const { roomId, action, payload } = body;
   if (!roomId || !action) return err('missing roomId or action');
 
