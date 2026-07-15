@@ -2,28 +2,37 @@
 // Falls back to in-memory store for local dev without EDGE_CONFIG
 const memStore = new Map();
 
-async function ecGet(key) {
-  if (!process.env.EDGE_CONFIG) return null;
+// Parse Edge Config connection string once
+let ecBase = null;
+let ecToken = null;
+if (process.env.EDGE_CONFIG) {
   try {
-    const res = await fetch(`${process.env.EDGE_CONFIG}&key=${encodeURIComponent(key)}`);
-    if (!res.ok) return null;
-    return await res.json();
-  } catch(e) { return null; }
+    const u = new URL(process.env.EDGE_CONFIG);
+    ecBase = `${u.protocol}//${u.host}${u.pathname}`;
+    ecToken = u.searchParams.get('token');
+  } catch(e) {}
 }
 
-async function ecSet(key, val) {
-  if (!process.env.EDGE_CONFIG) {
-    memStore.set(key, typeof val === 'string' ? val : JSON.stringify(val));
+async function ecGet(key) {
+  if (!ecBase || !ecToken) return undefined;
+  try {
+    const res = await fetch(`${ecBase}items/${encodeURIComponent(key)}?token=${ecToken}`);
+    if (!res.ok) return undefined;
+    const data = await res.json();
+    return data.value;
+  } catch(e) { return undefined; }
+}
+
+async function ecSet(key, value) {
+  if (!ecBase || !ecToken) {
+    memStore.set(key, value);
     return true;
   }
   try {
-    const url = new URL(process.env.EDGE_CONFIG);
-    const base = `${url.protocol}//${url.host}${url.pathname}`;
-    const token = url.searchParams.get('token');
-    const res = await fetch(`${base}/items?token=${token}`, {
+    const res = await fetch(`${ecBase}items?token=${ecToken}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: [{ op: 'upsert', key, value: val }] })
+      body: JSON.stringify({ items: [{ op: 'upsert', key, value }] })
     });
     return res.ok;
   } catch(e) { return false; }
@@ -32,28 +41,28 @@ async function ecSet(key, val) {
 const G = require('../lib/game.js');
 const { DRAW_MIN, DRAW_MAX } = G;
 
+// kvGet/kvSet: store raw JS values (no double-stringification)
 async function kvGet(key) {
   const val = await ecGet(key);
-  if (val !== null && val !== undefined) return val;
-  return memStore.get(key) || null;
+  if (val !== undefined) return val;
+  return memStore.get(key);
 }
-async function kvSet(key, val, ttl) {
-  const ok = await ecSet(key, typeof val === 'string' ? val : JSON.stringify(val));
-  if (!ok) memStore.set(key, typeof val === 'string' ? val : JSON.stringify(val));
+async function kvSet(key, val) {
+  const ok = await ecSet(key, val);
+  if (!ok) memStore.set(key, val);
   return true;
 }
 
-const TTL = 7200; // 2h room lifetime
+const TTL = 7200; // 2h room lifetime (Edge Config doesn't support per-key TTL, but we keep the param for API compat)
 
 function ok(data) { return { status:200, headers:{'Content-Type':'application/json','Cache-Control':'no-store','Access-Control-Allow-Origin':'*'}, body: JSON.stringify(data) }; }
 function err(msg, code=400) { return { status:code, headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}, body: JSON.stringify({ error: msg }) }; }
 
 async function getRoom(roomId) {
-  const raw = await kvGet('room:'+roomId);
-  return raw ? JSON.parse(raw) : null;
+  return await kvGet('room:'+roomId) || null;
 }
 async function saveRoom(room) {
-  await kvSet('room:'+room.id, room, TTL);
+  await kvSet('room:'+room.id, room);
 }
 
 async function handleGet(req) {
@@ -66,17 +75,21 @@ async function handleGet(req) {
   return ok({ ...G.publicState(room, playerId), playerId });
 }
 
+// Read request body — works in Vercel serverless (Node.js IncomingMessage) and Web API
 async function readBody(req) {
-  if (req.body) return req.body;
-  // Web API Request
+  if (req.body !== undefined && req.body !== null) return req.body;
+  // Web API Request (has text())
   if (typeof req.text === 'function') {
     try { const t = await req.text(); return t ? JSON.parse(t) : {}; } catch(e) { return {}; }
   }
-  // Node.js IncomingMessage
+  // Node.js IncomingMessage (stream)
   return new Promise(resolve => {
     let data = '';
     req.on('data', chunk => { data += chunk; });
-    req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch(e) { resolve({}); } });
+    req.on('end', () => {
+      try { resolve(data ? JSON.parse(data) : {}); }
+      catch(e) { resolve({}); }
+    });
     req.on('error', () => resolve({}));
   });
 }
@@ -167,7 +180,6 @@ async function doPlaceCard(roomId, { name, row, col, cardId }) {
   if (room.board[row][col] !== null) return err('该位置已有棋子');
 
   const card = room.drawnCards.splice(idx, 1)[0];
-  const pIdx = room.players.findIndex(p => p.name === name);
   room.board[row][col] = { card, playerId: cp.id };
 
   const result = G.scorePlacement(room.board, cp.id, row, col);
