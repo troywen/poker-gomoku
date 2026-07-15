@@ -1,5 +1,5 @@
-const CACHE = 'pg-v1';
-const ASSETS = ['/', '/index.html', '/manifest.json'];
+const CACHE = 'pg-v2';
+const ASSETS = ['/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -20,9 +20,16 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // WebSocket / socket.io / API requests go to network (never cache)
-  if (event.request.url.includes('/socket.io/') || event.request.url.includes('/api')) return;
+  // API / socket.io requests go to network
+  if (event.request.url.includes('/api') || event.request.url.includes('/socket.io')) return;
+  // Network-first for HTML/JS (real-time game needs fresh code)
   event.respondWith(
-    caches.match(event.request).then((res) => res || fetch(event.request))
+    fetch(event.request).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE).then((cache) => {
+        if (res.status === 200) cache.put(event.request, copy);
+      });
+      return res;
+    }).catch(() => caches.match(event.request))
   );
 });
