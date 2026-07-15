@@ -20,8 +20,8 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // WebSocket / socket.io requests go to network
-  if (event.request.url.includes('/socket.io/')) return;
+  // WebSocket / socket.io / API requests go to network (never cache)
+  if (event.request.url.includes('/socket.io/') || event.request.url.includes('/api')) return;
   event.respondWith(
     caches.match(event.request).then((res) => res || fetch(event.request))
   );

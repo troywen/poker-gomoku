@@ -237,8 +237,11 @@ body {
 
   <!-- Play area (playing phase) -->
   <div class="draw-area" id="playArea" style="display:none;">
-    <div class="area-label">从本回合抽的牌中选一张放到棋盘</div>
+    <div class="area-label">从本回合抽的牌中选一张放到棋盘（或弃掉）</div>
     <div class="card-row" id="playCards"></div>
+    <div class="action-bar">
+      <button class="btn btn-danger" id="discardBtn" onclick="discardSelected()" style="padding:8px 16px;">弃掉选中的牌</button>
+    </div>
   </div>
 
   <!-- Hand -->
@@ -258,29 +261,42 @@ body {
 </div>
 
 <script>
-const socket = io({
-  reconnection: true,
-  reconnectionAttempts: 10,
-  reconnectionDelay: 1000,
-});
 let myId = null, myRoomId = null, state = null;
 let selectedDrawnId = null;
+let pollTimer = null;
+let myName = localStorage.getItem('pg_name') || '';
 
-// Rejoin room after a reconnect (server keeps player for 90s)
-socket.on('connect', () => {
-  if (myRoomId && myId) {
-    const name = document.getElementById('nameInput').value.trim() || '玩家';
-    socket.emit('rejoinRoom', myRoomId, name, res => {
-      if (res.error) {
-        showModal('连接已断开', '房间已结束或已过期，请返回大厅。', '返回大厅', () => {
-          myRoomId = null; myId = null; showScreen('lobby');
-        });
-      }
-    });
-  }
-});
+// ─── API helpers ──────────────────────────────────────────────
+async function apiAction(action, payload) {
+  const res = await fetch('/api', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ roomId: myRoomId, action, payload: { name: myName, ...payload } }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  if (data.state) state = data.state;
+  return data;
+}
 
-// Haptic feedback helper
+async function fetchState() {
+  if (!myRoomId || !myId) return;
+  try {
+    const res = await fetch(`/api?roomId=${myRoomId}&playerId=${myId}`);
+    const data = await res.json();
+    if (data.error) return;
+    state = data;
+    renderAll();
+  } catch(e) {}
+}
+
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(() => fetchState(), 2000);
+}
+function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+// ─── Haptic ───────────────────────────────────────────────────
 function vibrate(pattern) { if (navigator.vibrate) navigator.vibrate(pattern); }
 
 function showScreen(id) {
@@ -313,40 +329,55 @@ function isRed(card) {
 }
 
 // ─── Lobby ────────────────────────────────────────────────────
-function createRoom() {
+async function createRoom() {
   const name = document.getElementById('nameInput').value.trim() || '玩家';
-  socket.emit('createRoom', name, res => {
-    myRoomId = res.roomId; myId = res.player.id;
+  myName = name;
+  localStorage.setItem('pg_name', name);
+  const roomId = Math.random().toString(36).slice(2,8).toUpperCase();
+  try {
+    await apiAction('createRoom', { name, roomId });
+    myRoomId = roomId; myId = 'p0';
+    saveRoomPref();
     showScreen('roomScreen');
-    document.getElementById('roomCodeDisplay').textContent = res.roomId;
+    document.getElementById('roomCodeDisplay').textContent = roomId;
     document.getElementById('hostControls').style.display = '';
     document.getElementById('guestInfo').style.display = 'none';
-    refreshWaiting();
-  });
+    startPolling();
+    fetchState();
+  } catch(e) { showModal('创建失败', e.message); }
 }
-function joinRoom() {
+
+async function joinRoom() {
   const roomId = document.getElementById('roomIdInput').value.trim().toUpperCase();
   const name = document.getElementById('nameInput').value.trim() || '玩家';
   if (!roomId) return;
-  socket.emit('joinRoom', roomId, name, res => {
-    if (res.error) { showModal('加入失败', res.error); return; }
-    myRoomId = roomId; myId = res.player.id;
+  myName = name;
+  localStorage.setItem('pg_name', name);
+  try {
+    await apiAction('joinRoom', { name, roomId });
+    myRoomId = roomId; myId = 'p1';
+    saveRoomPref();
     showScreen('roomScreen');
     document.getElementById('roomCodeDisplay').textContent = roomId;
     document.getElementById('hostControls').style.display = 'none';
     document.getElementById('guestInfo').style.display = '';
-    refreshWaiting();
-  });
+    startPolling();
+    fetchState();
+  } catch(e) { showModal('加入失败', e.message); }
 }
+
 function leaveRoom() {
-  myRoomId = null; myId = null; state = null;
+  stopPolling();
+  myRoomId = null; myId = null; state = null; selectedDrawnId = null;
+  saveRoomPref();
   showScreen('lobby');
 }
-function startGame() {
-  socket.emit('startGame', myRoomId, res => {
-    if (res.error) showModal('无法开始', res.error);
-  });
+
+async function startGame() {
+  try { await apiAction('startGame', {}); fetchState(); }
+  catch(e) { showModal('无法开始', e.message); }
 }
+
 function refreshWaiting() {
   const el = document.getElementById('waitingPlayers');
   if (state && state.players) {
@@ -355,11 +386,13 @@ function refreshWaiting() {
 }
 
 // ─── Draw ─────────────────────────────────────────────────────
-function drawN(n) {
-  socket.emit('drawCards', myRoomId, n, res => { if (res.error) setStatus(res.error); });
+async function drawN(n) {
+  try { await apiAction('drawCards', { count: n }); fetchState(); }
+  catch(e) { setStatus(e.message); }
 }
-function finishDraw() {
-  socket.emit('finishDraw', myRoomId, res => { if (res.error) setStatus(res.error); });
+async function finishDraw() {
+  try { await apiAction('finishDraw', {}); fetchState(); }
+  catch(e) { setStatus(e.message); }
 }
 
 // ─── Place ────────────────────────────────────────────────────
@@ -368,24 +401,62 @@ function selectDrawnCard(cardId) {
   renderPlayCards();
 }
 
-function handleCellClick(r, c) {
+async function handleCellClick(r, c) {
   if (!selectedDrawnId) { setStatus('请先从下方选择一张要出的牌'); return; }
-  socket.emit('placeCard', myRoomId, r, c, selectedDrawnId, res => {
-    if (res.error) { setStatus(res.error); return; }
+  try {
+    const data = await apiAction('placeCard', { row: r, col: c, cardId: selectedDrawnId });
     selectedDrawnId = null;
     vibrate(50);
-    if (res.result && res.result.messages && res.result.messages.length) {
+    if (data.result && data.result.messages && data.result.messages.length) {
       let html = '';
-      for (const m of res.result.messages) html += `<div class="score-msg">${m}</div>`;
+      for (const m of data.result.messages) html += `<div class="score-msg">${m}</div>`;
       vibrate([50, 30, 50]);
-      showModal('🎉 得分！', html + `<p>共 +${res.result.points} 分</p>`, '好的');
+      showModal('🎉 得分！', html + `<p>共 +${data.result.points} 分</p>`, '好的');
     } else {
       vibrate(30);
     }
-  });
+    fetchState();
+  } catch(e) { setStatus(e.message); }
+}
+
+async function discardSelected() {
+  if (!selectedDrawnId) { setStatus('请先选择一张牌'); return; }
+  try { await apiAction('discardCard', { cardId: selectedDrawnId }); selectedDrawnId = null; fetchState(); }
+  catch(e) { setStatus(e.message); }
+}
+
+// ─── Rejoin ───────────────────────────────────────────────────
+async function rejoinIfNeeded() {
+  if (!myRoomId || !myName) return;
+  try {
+    const data = await apiAction('rejoinRoom', {});
+    if (data.ok && data.player) {
+      myId = data.player.id;
+      if (data.state) state = data.state;
+      renderAll();
+    }
+  } catch(e) {}
 }
 
 // ─── Render ───────────────────────────────────────────────────
+function renderAll() {
+  if (!state) return;
+  renderBoard();
+  renderHand();
+  renderDrawPool();
+  renderPlayCards();
+  renderPhaseUI();
+  renderHeader();
+  refreshWaiting();
+
+  if (state.lastAction && state.lastAction.type === 'gameover') {
+    let html = '';
+    for (const sc of state.lastAction.scores) html += `<p>${sc.name} — ${sc.score} 分</p>`;
+    stopPolling();
+    showModal('🏆 游戏结束', html, '返回大厅', () => showScreen('lobby'));
+  }
+}
+
 function renderBoard() {
   const board = document.getElementById('board');
   board.innerHTML = '';
@@ -418,10 +489,10 @@ function renderHand() {
   row.innerHTML = '';
   if (!state.hand) { area.style.display = 'none'; return; }
   area.style.display = '';
-  for (const card of state.hand) row.appendChild(handCardEl(card, false));
+  for (const card of state.hand) row.appendChild(handCardEl(card));
 }
 
-function handCardEl(card, selectable) {
+function handCardEl(card) {
   const el = document.createElement('div');
   el.className = 'hand-card ' + (isRed(card) ? 'red' : 'black');
   el.innerHTML = `<span>${card.rank}</span><span class="suit">${card.suit}</span>`;
@@ -432,19 +503,13 @@ function renderDrawPool() {
   const row = document.getElementById('drawnPool');
   row.innerHTML = '';
   const btn = document.getElementById('finishDrawBtn');
-  if (!state.drawnCards || state.drawnCards.length === 0) {
-    btn.style.display = 'none';
-    return;
-  }
+  if (!state.drawnCards || state.drawnCards.length === 0) { btn.style.display = 'none'; return; }
   btn.style.display = state.drawnCards.length >= 1 ? '' : 'none';
   for (const card of state.drawnCards) {
     const el = document.createElement('div');
     el.className = 'drawn-card ' + (isRed(card) ? 'red' : 'black');
     el.innerHTML = `<span>${card.rank}</span><span class="suit">${card.suit}</span>`;
-    el.addEventListener('click', () => {
-      selectedDrawnId = card.id;
-      renderDrawPool(); renderPlayCards();
-    });
+    el.addEventListener('click', () => { selectedDrawnId = card.id; renderDrawPool(); renderPlayCards(); });
     if (card.id === selectedDrawnId) el.classList.add('sel');
     row.appendChild(el);
   }
@@ -466,17 +531,13 @@ function renderPlayCards() {
 }
 
 function renderPhaseUI() {
-  const isMyTurn = state.players && myPlayerIdx() === state.currentPlayerIndex;
+  if (!state.players) return;
+  const isMyTurn = myPlayerIdx() === state.currentPlayerIndex;
   const dc = document.getElementById('drawControls');
   const pa = document.getElementById('playArea');
-
-  if (state.phase === 'drawing' && isMyTurn) {
-    dc.style.display = ''; pa.style.display = 'none';
-  } else if (state.phase === 'playing' && isMyTurn) {
-    dc.style.display = 'none'; pa.style.display = '';
-  } else {
-    dc.style.display = 'none'; pa.style.display = 'none';
-  }
+  if (state.phase === 'drawing' && isMyTurn) { dc.style.display = ''; pa.style.display = 'none'; }
+  else if (state.phase === 'playing' && isMyTurn) { dc.style.display = 'none'; pa.style.display = ''; }
+  else { dc.style.display = 'none'; pa.style.display = 'none'; }
 }
 
 function renderHeader() {
@@ -502,27 +563,25 @@ function myPlayerIdx() {
   return state.players.findIndex(p => p.id === myId);
 }
 
-// ─── Socket ───────────────────────────────────────────────────
-socket.on('gameState', s => {
-  state = s;
-  renderBoard();
-  renderHand();
-  renderDrawPool();
-  renderPlayCards();
-  renderPhaseUI();
-  renderHeader();
-  refreshWaiting();
-
-  if (s.lastAction && s.lastAction.type === 'gameover') {
-    let html = '';
-    for (const sc of s.lastAction.scores) html += `<p>${sc.name} — ${sc.score} 分</p>`;
-    showModal('🏆 游戏结束', html, '返回大厅', () => showScreen('lobby'));
-  }
+// ─── Init ─────────────────────────────────────────────────────
+document.getElementById('nameInput').value = myName;
+document.getElementById('nameInput').addEventListener('input', e => {
+  myName = e.target.value; localStorage.setItem('pg_name', myName);
 });
 
-// name persistence
-document.getElementById('nameInput').value = localStorage.getItem('pg_name') || '';
-document.getElementById('nameInput').addEventListener('input', e => localStorage.setItem('pg_name', e.target.value));
+// Auto-rejoin on page reload
+if (localStorage.getItem('pg_room') && localStorage.getItem('pg_name')) {
+  myRoomId = localStorage.getItem('pg_room');
+  myName = localStorage.getItem('pg_name');
+  document.getElementById('nameInput').value = myName;
+  rejoinIfNeeded();
+  startPolling();
+}
+
+function saveRoomPref() {
+  if (myRoomId) localStorage.setItem('pg_room', myRoomId);
+  else localStorage.removeItem('pg_room');
+}
 
 // Register service worker for PWA offline support
 if ('serviceWorker' in navigator) {

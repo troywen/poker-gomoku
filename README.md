@@ -13,22 +13,25 @@ npm start
 
 ## 线上部署
 
-### Render / Railway / Heroku（推荐）
-
-项目已含 `Procfile`，直接连接 GitHub 仓库即可自动部署。
+### Vercel（推荐，国内可访问）
 
 1. 将本项目推送到 GitHub
-2. 在 Render/Railway 新建 Web Service，指向该仓库
-3. 部署完成后获得公开 URL，在手机浏览器打开即可联机
+2. 登录 [vercel.com](https://vercel.com)（用 GitHub 账号）
+3. **Add New Project** → 导入 `troywen/poker-gomoku`
+4. 部署前，先在 Vercel 项目设置中开启 **Storage → Vercel KV**（免费，用于房间状态存储）
+5. 点 **Deploy**，等待 1-2 分钟
+6. 部署完成后获得 `https://poker-gomoku-xxxx.vercel.app` 网址，国内可直接访问
 
-### Docker
+### 本地运行（Socket.IO 模式）
 
 ```bash
-docker build -t poker-gomoku .
-docker run -p 3000:3000 poker-gomoku
+cd poker-gomoku
+npm install
+npm start
+# 打开 http://localhost:3000
 ```
 
-## 手机上玩
+### 手机上玩
 
 部署后在手机浏览器（Chrome）打开 URL：
 - 点击浏览器菜单 → **"添加到主屏幕"**，即可像 App 一样启动（PWA 支持）
