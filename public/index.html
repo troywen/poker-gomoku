@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1a1a2e">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>扑克五子棋</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #1a1a2e; color: #e0e0e0;
+  min-height:100vh; overflow-x:hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+.screen { display:none; flex-direction:column; align-items:center; min-height:100vh; padding:12px; }
+.screen.active { display:flex; }
+
+/* Lobby */
+.lobby-box {
+  background:#16213e; border-radius:16px; padding:32px 24px;
+  width:100%; max-width:380px; margin-top:50px;
+  box-shadow:0 8px 32px rgba(0,0,0,0.4);
+}
+.lobby-box h1 { text-align:center; font-size:22px; color:#ffd700; margin-bottom:4px; }
+.lobby-box .sub { text-align:center; font-size:12px; color:#888; margin-bottom:22px; }
+.field { margin-bottom:12px; }
+.field label { display:block; font-size:12px; color:#aaa; margin-bottom:4px; }
+.field input {
+  width:100%; padding:10px 12px; border-radius:8px; border:1px solid #333;
+  background:#0f0f23; color:#fff; font-size:15px; outline:none;
+}
+.field input:focus { border-color:#ffd700; }
+.btn-row { display:flex; gap:10px; margin-top:6px; }
+.btn {
+  flex:1; padding:12px; border:none; border-radius:10px; font-size:14px;
+  font-weight:600; cursor:pointer; transition:transform .1s, opacity .1s;
+}
+.btn:active { transform:scale(0.97); }
+.btn-primary { background:#ffd700; color:#1a1a2e; }
+.btn-secondary { background:#333; color:#ddd; }
+.btn-danger { background:#e74c3c; color:#fff; }
+.btn-success { background:#27ae60; color:#fff; }
+.btn:disabled { opacity:0.4; cursor:default; }
+.room-code { text-align:center; font-size:28px; letter-spacing:6px; color:#ffd700; font-weight:700; margin:10px 0; }
+#joinArea { display:none; margin-top:12px; }
+
+/* Game header */
+.game-header {
+  width:100%; max-width:520px; display:flex; justify-content:space-between;
+  align-items:center; margin-bottom:6px; padding:8px 10px;
+  background:#16213e; border-radius:12px;
+}
+.pinfo { display:flex; align-items:center; gap:8px; }
+.pinfo .name { font-size:12px; }
+.pinfo .score { font-size:17px; font-weight:700; color:#ffd700; }
+.pinfo.active .name { color:#ffd700; }
+.turn-text { font-size:11px; color:#aaa; text-align:center; }
+
+/* Board */
+.board-wrap { margin:4px 0; display:flex; justify-content:center; }
+.board {
+  display:grid; grid-template-columns:repeat(5,1fr); gap:3px;
+  padding:8px; background:#0f0f23; border-radius:12px;
+  width: min(92vw, 520px);
+}
+.cell {
+  width: 100%; aspect-ratio:1;
+  border-radius:6px; background:#1e1e3a; display:flex; align-items:center;
+  justify-content:center; cursor:pointer; border:1px solid #2a2a4a;
+  position:relative; transition:background .15s;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.cell.hi { background:#1a3a2a; border-color:#27ae60; }
+.cell.hi::after { content:'·'; position:absolute; color:#27ae60; font-size:20px; }
+.cell.occ { cursor:default; }
+
+/* Card */
+.card {
+  width: clamp(30px,8.5vw,48px); height:clamp(40px,10.5vw,62px);
+  border-radius:5px; display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  font-size:clamp(10px,2.8vw,13px); font-weight:700;
+  border:1.5px solid; background:#fff; user-select:none;
+}
+.card.red { color:#c0392b; border-color:#c0392b; }
+.card.black { color:#2c3e50; border-color:#2c3e50; }
+.card .suit { font-size:clamp(8px,2.2vw,11px); }
+
+/* Hand */
+.hand-area, .draw-area {
+  width:100%; max-width:520px; margin-top:6px;
+  background:#16213e; border-radius:12px; padding:10px; text-align:center;
+}
+.area-label { font-size:11px; color:#888; margin-bottom:6px; }
+.card-row { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; }
+
+.hand-card {
+  width:clamp(42px,10.5vw,60px); height:clamp(58px,13.5vw,84px);
+  border-radius:6px; display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  font-size:clamp(11px,3vw,14px); font-weight:700;
+  border:1.5px solid; background:#fff; cursor:pointer;
+  transition:transform .15s, box-shadow .15s;
+  touch-action: manipulation;
+}
+.hand-card:active { transform:scale(0.93); }
+.hand-card.red { color:#c0392b; border-color:#c0392b; }
+.hand-card.black { color:#2c3e50; border-color:#2c3e50; }
+.hand-card.sel { transform:translateY(-8px); box-shadow:0 4px 12px rgba(255,215,0,0.4); border-color:#ffd700; }
+
+.drawn-card {
+  width:clamp(40px,10vw,58px); height:clamp(54px,12.5vw,78px);
+  border-radius:6px; display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  font-size:clamp(11px,3vw,13px); font-weight:700;
+  border:1.5px solid; background:#fff; cursor:pointer;
+  touch-action: manipulation;
+}
+.drawn-card.red { color:#c0392b; border-color:#c0392b; }
+.drawn-card.black { color:#2c3e50; border-color:#2c3e50; }
+.drawn-card.sel { transform:translateY(-6px); box-shadow:0 4px 12px rgba(255,215,0,0.4); border-color:#ffd700; }
+
+.action-bar { display:flex; gap:8px; margin-top:8px; justify-content:center; flex-wrap:wrap; }
+
+/* Status */
+.status-bar {
+  width:100%; max-width:520px; margin-top:4px; padding:7px 12px;
+  background:#16213e; border-radius:10px; font-size:12px; color:#aaa;
+  text-align:center; min-height:34px; display:flex; align-items:center; justify-content:center;
+}
+
+/* Modal */
+.modal-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,0.72);
+  z-index:100; align-items:center; justify-content:center; padding:20px;
+}
+.modal-overlay.show { display:flex; }
+.modal {
+  background:#16213e; border-radius:16px; padding:28px 24px;
+  max-width:360px; width:100%; text-align:center;
+  box-shadow:0 12px 40px rgba(0,0,0,0.5);
+}
+.modal h2 { color:#ffd700; font-size:19px; margin-bottom:8px; }
+.modal p { color:#ccc; font-size:13px; margin:4px 0; }
+.score-msg { color:#27ae60; font-size:12px; margin:2px 0; }
+
+/* Rules */
+.rules-toggle { margin-top:16px; text-align:center; }
+.rules-toggle a { color:#ffd700; font-size:12px; cursor:pointer; text-decoration:underline; }
+.rules-box { display:none; margin-top:10px; font-size:11px; color:#aaa; line-height:1.7; text-align:left; }
+.rules-box.show { display:block; }
+.rules-box b { color:#ddd; }
+
+@media (max-height:720px) {
+  .hand-card { height:clamp(48px,11vw,70px); }
+  .card { height:clamp(36px,9vw,52px); }
+}
+</style>
+</head>
+<body>
+
+<!-- LOBBY -->
+<div id="lobby" class="screen active">
+  <div class="lobby-box">
+    <h1>🃏 扑克五子棋</h1>
+    <p class="sub">Poker Gomoku · 双人对战</p>
+    <div class="field">
+      <label>昵称</label>
+      <input id="nameInput" maxlength="12" placeholder="输入昵称">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="createRoom()">创建房间</button>
+      <button class="btn btn-secondary" onclick="toggleJoin()">加入房间</button>
+    </div>
+    <div id="joinArea">
+      <div class="field" style="margin-top:10px;">
+        <label>房间号</label>
+        <input id="roomIdInput" maxlength="8" placeholder="6位房间号" style="text-transform:uppercase;letter-spacing:2px;">
+      </div>
+      <button class="btn btn-primary" onclick="joinRoom()">加入</button>
+    </div>
+    <div class="rules-toggle"><a onclick="toggleRules()">📖 查看规则</a></div>
+    <div class="rules-box" id="rulesBox">
+      <b>棋盘</b>：5×5，横竖各5格。<br>
+      <b>抽牌</b>：每回合抽 1–4 张，从中选一张放到棋盘上，其余加入手牌。<br>
+      <b>成五</b>：同色且点数连号 ≥3 个即得分，凑满 5 个双倍奖励。<br>
+      <b>成对</b>：同点数即成对（不看花色/个数），大小王只能互相对。<br>
+      <b>方向</b>：横、竖、斜均可；中间空档忽略；多方向同时成立均可得分。<br>
+      <b>大小王</b>：视为石头，两个也能成对，但必须大小王互相对才能消。
+    </div>
+  </div>
+</div>
+
+<!-- ROOM WAITING -->
+<div id="roomScreen" class="screen">
+  <div class="lobby-box">
+    <p style="font-size:12px;color:#aaa;text-align:center;">房间号</p>
+    <div class="room-code" id="roomCodeDisplay">------</div>
+    <div id="waitingPlayers" style="text-align:center;font-size:13px;color:#aaa;margin:10px 0;"></div>
+    <div id="hostControls" style="display:none;">
+      <button class="btn btn-success" onclick="startGame()" style="width:100%;">开始游戏</button>
+    </div>
+    <div id="guestInfo" style="display:none;text-align:center;font-size:13px;color:#aaa;margin-top:10px;">
+      等待房主开始游戏…
+    </div>
+    <button class="btn btn-danger" style="width:100%;margin-top:12px;" onclick="leaveRoom()">离开</button>
+  </div>
+</div>
+
+<!-- GAME -->
+<div id="gameScreen" class="screen">
+  <div class="game-header">
+    <div class="pinfo" id="p0Info"><div><div class="name" id="p0Name">-</div><div class="score" id="p0Score">0</div></div></div>
+    <div class="turn-text" id="turnInfo">等待开始</div>
+    <div class="pinfo" id="p1Info"><div><div class="name" id="p1Name">-</div><div class="score" id="p1Score">0</div></div></div>
+  </div>
+
+  <div class="status-bar" id="statusBar">—</div>
+
+  <div class="board-wrap"><div class="board" id="board"></div></div>
+
+  <!-- Draw controls (drawing phase, my turn) -->
+  <div class="draw-area" id="drawControls" style="display:none;">
+    <div class="area-label">抽牌（选 1–4 张）</div>
+    <div class="action-bar">
+      <button class="btn btn-secondary" style="width:56px;padding:8px;" onclick="drawN(1)">+1</button>
+      <button class="btn btn-secondary" style="width:56px;padding:8px;" onclick="drawN(2)">+2</button>
+      <button class="btn btn-secondary" style="width:56px;padding:8px;" onclick="drawN(3)">+3</button>
+      <button class="btn btn-secondary" style="width:56px;padding:8px;" onclick="drawN(4)">+4</button>
+    </div>
+    <div class="card-row" id="drawnPool" style="margin-top:8px;"></div>
+    <button class="btn btn-success" id="finishDrawBtn" style="display:none;margin-top:6px;" onclick="finishDraw()">抽完了，出牌</button>
+  </div>
+
+  <!-- Play area (playing phase) -->
+  <div class="draw-area" id="playArea" style="display:none;">
+    <div class="area-label">从本回合抽的牌中选一张放到棋盘</div>
+    <div class="card-row" id="playCards"></div>
+  </div>
+
+  <!-- Hand -->
+  <div class="hand-area" id="handArea" style="display:none;">
+    <div class="area-label" id="handLabel">手牌</div>
+    <div class="card-row" id="handCards"></div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h2 id="modalTitle">标题</h2>
+    <div id="modalBody"></div>
+    <button class="btn btn-primary" id="modalBtn" style="margin-top:14px;">确定</button>
+  </div>
+</div>
+
+<script>
+const socket = io({
+  reconnection: true,
+  reconnectionAttempts: 10,
+  reconnectionDelay: 1000,
+});
+let myId = null, myRoomId = null, state = null;
+let selectedDrawnId = null;
+
+// Rejoin room after a reconnect (server keeps player for 90s)
+socket.on('connect', () => {
+  if (myRoomId && myId) {
+    const name = document.getElementById('nameInput').value.trim() || '玩家';
+    socket.emit('rejoinRoom', myRoomId, name, res => {
+      if (res.error) {
+        showModal('连接已断开', '房间已结束或已过期，请返回大厅。', '返回大厅', () => {
+          myRoomId = null; myId = null; showScreen('lobby');
+        });
+      }
+    });
+  }
+});
+
+// Haptic feedback helper
+function vibrate(pattern) { if (navigator.vibrate) navigator.vibrate(pattern); }
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function toggleJoin() {
+  const el = document.getElementById('joinArea');
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+function toggleRules() {
+  document.getElementById('rulesBox').classList.toggle('show');
+}
+
+function showModal(title, bodyHtml, btnText, onOk) {
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML = bodyHtml;
+  document.getElementById('modalBtn').textContent = btnText || '确定';
+  document.getElementById('modalOverlay').classList.add('show');
+  const btn = document.getElementById('modalBtn');
+  btn.onclick = () => { closeModal(); if (onOk) onOk(); };
+}
+function closeModal() { document.getElementById('modalOverlay').classList.remove('show'); }
+function setStatus(msg) { document.getElementById('statusBar').textContent = msg; }
+
+function isRed(card) {
+  if (card.color !== undefined) return card.color === 'red';
+  return card.suit === '♥' || card.suit === '♦';
+}
+
+// ─── Lobby ────────────────────────────────────────────────────
+function createRoom() {
+  const name = document.getElementById('nameInput').value.trim() || '玩家';
+  socket.emit('createRoom', name, res => {
+    myRoomId = res.roomId; myId = res.player.id;
+    showScreen('roomScreen');
+    document.getElementById('roomCodeDisplay').textContent = res.roomId;
+    document.getElementById('hostControls').style.display = '';
+    document.getElementById('guestInfo').style.display = 'none';
+    refreshWaiting();
+  });
+}
+function joinRoom() {
+  const roomId = document.getElementById('roomIdInput').value.trim().toUpperCase();
+  const name = document.getElementById('nameInput').value.trim() || '玩家';
+  if (!roomId) return;
+  socket.emit('joinRoom', roomId, name, res => {
+    if (res.error) { showModal('加入失败', res.error); return; }
+    myRoomId = roomId; myId = res.player.id;
+    showScreen('roomScreen');
+    document.getElementById('roomCodeDisplay').textContent = roomId;
+    document.getElementById('hostControls').style.display = 'none';
+    document.getElementById('guestInfo').style.display = '';
+    refreshWaiting();
+  });
+}
+function leaveRoom() {
+  myRoomId = null; myId = null; state = null;
+  showScreen('lobby');
+}
+function startGame() {
+  socket.emit('startGame', myRoomId, res => {
+    if (res.error) showModal('无法开始', res.error);
+  });
+}
+function refreshWaiting() {
+  const el = document.getElementById('waitingPlayers');
+  if (state && state.players) {
+    el.textContent = state.players.map(p => p.name + (p.id === myId ? ' (你)' : '')).join(' · ');
+  }
+}
+
+// ─── Draw ─────────────────────────────────────────────────────
+function drawN(n) {
+  socket.emit('drawCards', myRoomId, n, res => { if (res.error) setStatus(res.error); });
+}
+function finishDraw() {
+  socket.emit('finishDraw', myRoomId, res => { if (res.error) setStatus(res.error); });
+}
+
+// ─── Place ────────────────────────────────────────────────────
+function selectDrawnCard(cardId) {
+  selectedDrawnId = cardId;
+  renderPlayCards();
+}
+
+function handleCellClick(r, c) {
+  if (!selectedDrawnId) { setStatus('请先从下方选择一张要出的牌'); return; }
+  socket.emit('placeCard', myRoomId, r, c, selectedDrawnId, res => {
+    if (res.error) { setStatus(res.error); return; }
+    selectedDrawnId = null;
+    vibrate(50);
+    if (res.result && res.result.messages && res.result.messages.length) {
+      let html = '';
+      for (const m of res.result.messages) html += `<div class="score-msg">${m}</div>`;
+      vibrate([50, 30, 50]);
+      showModal('🎉 得分！', html + `<p>共 +${res.result.points} 分</p>`, '好的');
+    } else {
+      vibrate(30);
+    }
+  });
+}
+
+// ─── Render ───────────────────────────────────────────────────
+function renderBoard() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 5; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      const data = state.board[r][c];
+      if (data) {
+        cell.classList.add('occ');
+        cell.appendChild(cardEl(data.card));
+      } else {
+        cell.addEventListener('click', () => handleCellClick(r, c));
+      }
+      board.appendChild(cell);
+    }
+  }
+}
+
+function cardEl(card) {
+  const el = document.createElement('div');
+  el.className = 'card ' + (isRed(card) ? 'red' : 'black');
+  el.innerHTML = `<span>${card.rank}</span><span class="suit">${card.suit}</span>`;
+  return el;
+}
+
+function renderHand() {
+  const area = document.getElementById('handArea');
+  const row = document.getElementById('handCards');
+  row.innerHTML = '';
+  if (!state.hand) { area.style.display = 'none'; return; }
+  area.style.display = '';
+  for (const card of state.hand) row.appendChild(handCardEl(card, false));
+}
+
+function handCardEl(card, selectable) {
+  const el = document.createElement('div');
+  el.className = 'hand-card ' + (isRed(card) ? 'red' : 'black');
+  el.innerHTML = `<span>${card.rank}</span><span class="suit">${card.suit}</span>`;
+  return el;
+}
+
+function renderDrawPool() {
+  const row = document.getElementById('drawnPool');
+  row.innerHTML = '';
+  const btn = document.getElementById('finishDrawBtn');
+  if (!state.drawnCards || state.drawnCards.length === 0) {
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = state.drawnCards.length >= 1 ? '' : 'none';
+  for (const card of state.drawnCards) {
+    const el = document.createElement('div');
+    el.className = 'drawn-card ' + (isRed(card) ? 'red' : 'black');
+    el.innerHTML = `<span>${card.rank}</span><span class="suit">${card.suit}</span>`;
+    el.addEventListener('click', () => {
+      selectedDrawnId = card.id;
+      renderDrawPool(); renderPlayCards();
+    });
+    if (card.id === selectedDrawnId) el.classList.add('sel');
+    row.appendChild(el);
+  }
+}
+
+function renderPlayCards() {
+  const row = document.getElementById('playCards');
+  row.innerHTML = '';
+  if (!state.drawnCards) return;
+  for (const card of state.drawnCards) {
+    const el = document.createElement('div');
+    el.className = 'drawn-card ' + (isRed(card) ? 'red' : 'black');
+    el.innerHTML = `<span>${card.rank}</span><span class="suit">${card.suit}</span>`;
+    if (card.id === selectedDrawnId) el.classList.add('sel');
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', () => selectDrawnCard(card.id));
+    row.appendChild(el);
+  }
+}
+
+function renderPhaseUI() {
+  const isMyTurn = state.players && myPlayerIdx() === state.currentPlayerIndex;
+  const dc = document.getElementById('drawControls');
+  const pa = document.getElementById('playArea');
+
+  if (state.phase === 'drawing' && isMyTurn) {
+    dc.style.display = ''; pa.style.display = 'none';
+  } else if (state.phase === 'playing' && isMyTurn) {
+    dc.style.display = 'none'; pa.style.display = '';
+  } else {
+    dc.style.display = 'none'; pa.style.display = 'none';
+  }
+}
+
+function renderHeader() {
+  if (!state.players) return;
+  for (let i = 0; i < 2; i++) {
+    const p = state.players[i];
+    if (!p) continue;
+    document.getElementById('p'+i+'Name').textContent = p.name + (p.id === myId ? ' (你)' : '');
+    document.getElementById('p'+i+'Score').textContent = p.score;
+    document.getElementById('p'+i+'Info').classList.toggle('active', i === state.currentPlayerIndex);
+  }
+  const ti = document.getElementById('turnInfo');
+  if (state.phase === 'waiting') ti.textContent = '等待开始';
+  else if (state.phase === 'gameover') ti.textContent = '游戏结束';
+  else {
+    const cp = state.players[state.currentPlayerIndex];
+    ti.textContent = cp ? (cp.id === myId ? '▶ 你的回合' : cp.name + ' 的回合') : '';
+  }
+}
+
+function myPlayerIdx() {
+  if (!state.players) return -1;
+  return state.players.findIndex(p => p.id === myId);
+}
+
+// ─── Socket ───────────────────────────────────────────────────
+socket.on('gameState', s => {
+  state = s;
+  renderBoard();
+  renderHand();
+  renderDrawPool();
+  renderPlayCards();
+  renderPhaseUI();
+  renderHeader();
+  refreshWaiting();
+
+  if (s.lastAction && s.lastAction.type === 'gameover') {
+    let html = '';
+    for (const sc of s.lastAction.scores) html += `<p>${sc.name} — ${sc.score} 分</p>`;
+    showModal('🏆 游戏结束', html, '返回大厅', () => showScreen('lobby'));
+  }
+});
+
+// name persistence
+document.getElementById('nameInput').value = localStorage.getItem('pg_name') || '';
+document.getElementById('nameInput').addEventListener('input', e => localStorage.setItem('pg_name', e.target.value));
+
+// Register service worker for PWA offline support
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
