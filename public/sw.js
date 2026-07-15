@@ -1,4 +1,4 @@
-const CACHE = 'pg-v3';
+const CACHE = 'pg-v4';
 const ASSETS = ['/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
