@@ -1,22 +1,38 @@
-let kv = null;
-try { kv = require('@vercel/kv').kv; } catch(e) {}
+// Redis client (Vercel Redis / Upstash via REDIS_URL env var)
+// Falls back to in-memory store for local dev without a Redis connection
+let redis = null;
+let redisReady = false;
+let redisConnecting = false;
+
+async function getRedis() {
+  if (redisReady) return redis;
+  if (redisConnecting || !process.env.REDIS_URL) return null;
+  redisConnecting = true;
+  try {
+    const { createClient } = require('redis');
+    redis = createClient({ url: process.env.REDIS_URL });
+    redis.on('error', () => { redisReady = false; });
+    await redis.connect();
+    redisReady = true;
+  } catch(e) { redis = null; }
+  redisConnecting = false;
+  return redisReady ? redis : null;
+}
+
 const G = require('../lib/game.js');
 const { DRAW_MIN, DRAW_MAX } = G;
 
-// In-memory fallback for local dev (no KV)
+// In-memory fallback for local dev (no Redis)
 const memStore = new Map();
-const memVer = new Map();
 async function kvGet(key) {
-  try { if (kv) return await kv.get(key); } catch(e) {}
+  const r = await getRedis();
+  try { if (r) return await r.get(key); } catch(e) {}
   return memStore.get(key) || null;
 }
 async function kvSet(key, val, ttl) {
-  try { if (kv) return await kv.set(key, val, { ex: ttl }); } catch(e) {}
+  const r = await getRedis();
+  try { if (r) return await r.set(key, val, { EX: ttl }); } catch(e) {}
   memStore.set(key, typeof val === 'string' ? val : JSON.stringify(val)); return true;
-}
-async function kvIncr(key) {
-  try { if (kv) return await kv.incr(key); } catch(e) {}
-  const v = (memVer.get(key) || 0) + 1; memVer.set(key, v); return v;
 }
 
 const TTL = 7200; // 2h room lifetime
