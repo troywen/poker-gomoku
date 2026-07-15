@@ -68,10 +68,17 @@ async function handleGet(req) {
 
 async function readBody(req) {
   if (req.body) return req.body;
-  try {
-    const text = await req.text();
-    return text ? JSON.parse(text) : {};
-  } catch(e) { return {}; }
+  // Web API Request
+  if (typeof req.text === 'function') {
+    try { const t = await req.text(); return t ? JSON.parse(t) : {}; } catch(e) { return {}; }
+  }
+  // Node.js IncomingMessage
+  return new Promise(resolve => {
+    let data = '';
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch(e) { resolve({}); } });
+    req.on('error', () => resolve({}));
+  });
 }
 
 async function handlePost(req) {
