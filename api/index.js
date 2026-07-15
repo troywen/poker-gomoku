@@ -67,8 +67,7 @@ async function handleGet(req) {
 }
 
 async function handlePost(req) {
-  let body;
-  try { body = await req.json(); } catch(e) { return err('invalid body'); }
+  const body = req.body || {};
   const { roomId, action, payload } = body;
   if (!roomId || !action) return err('missing roomId or action');
 
